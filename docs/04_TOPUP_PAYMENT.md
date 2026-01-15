@@ -26,13 +26,17 @@ Pilih Jumlah Token
 
 ### Metode Pembayaran
 
-| Method | Description | Status |
-|--------|-------------|--------|
-| Bank Transfer (VA) | Virtual Account BCA, BNI, Mandiri, dll | ✅ Active |
-| QRIS | Scan QR untuk pembayaran | ✅ Active |
-| E-Wallet | OVO, GoPay, Dana, dll | ✅ Active |
-| Credit Card | Visa, Mastercard | ✅ Active |
-| Checkout Page | Redirect ke halaman pembayaran | ✅ Active |
+| Method | Code | Description |
+|--------|------|-------------|
+| Checkout Page | `checkout_page` | Halaman pembayaran Winpay |
+| QRIS | `qris` | Scan QR untuk bayar |
+| VA BRI | `va_bri` | Transfer ke Virtual Account BRI |
+| VA BNI | `va_bni` | Transfer ke Virtual Account BNI |
+| VA BCA | `va_bca` | Transfer ke Virtual Account BCA |
+| VA Mandiri | `va_mandiri` | Transfer ke Virtual Account Mandiri |
+| VA Permata | `va_permata` | Transfer ke Virtual Account Permata |
+| VA BSI | `va_bsi` | Transfer ke Virtual Account BSI |
+| VA CIMB | `va_cimb` | Transfer ke Virtual Account CIMB |
 
 ---
 
@@ -44,16 +48,17 @@ import { KGiTONApiService } from '@kgiton/react-native-sdk';
 const api = new KGiTONApiService({ baseUrl: 'https://api.kgiton.com' });
 
 // Create top-up transaction
-const transaction = await api.topup.create({
+const transaction = await api.topup.request({
   licenseKey: 'KGITON-2026-XXXXX-00001',
-  tokenAmount: 100,
-  paymentMethod: 'bank_transfer',
-  paymentChannel: 'bca_va',
+  tokenCount: 100,
+  paymentMethod: 'va_bca', // checkout_page, va_bri, va_bni, va_bca, qris, dll
 });
 
+console.log('Transaction ID:', transaction.transactionId);
 console.log('Payment URL:', transaction.paymentUrl);
-console.log('VA Number:', transaction.vaNumber);
-console.log('Amount:', transaction.amount);
+console.log('VA Number:', transaction.virtualAccount?.number);
+console.log('QRIS URL:', transaction.qris?.qrImageUrl);
+console.log('Amount:', transaction.amountToPay);
 console.log('Expires:', transaction.expiresAt);
 ```
 
@@ -93,28 +98,20 @@ interface TopupPackage {
 const methods = await api.topup.getPaymentMethods();
 
 methods.forEach((method) => {
-  console.log(`${method.name} (${method.code})`);
-  method.channels.forEach((channel) => {
-    console.log(`  - ${channel.name}: ${channel.code}`);
-  });
+  console.log(`${method.name} (${method.id})`);
+  console.log(`  Type: ${method.type}`);
+  console.log(`  Enabled: ${method.enabled}`);
 });
 ```
 
 **Response Type:**
 ```typescript
-interface PaymentMethod {
-  code: string;
-  name: string;
-  channels: PaymentChannel[];
-}
-
-interface PaymentChannel {
-  code: string;
-  name: string;
-  minAmount: number;
-  maxAmount: number;
-  fee: number;
-  feeType: 'fixed' | 'percentage';
+interface PaymentMethodInfo {
+  id: string;          // checkout_page, va_bri, va_bni, va_bca, qris, dll
+  name: string;        // Nama display
+  description?: string;
+  type: 'checkout' | 'va' | 'qris';
+  enabled: boolean;
 }
 ```
 
@@ -123,37 +120,44 @@ interface PaymentChannel {
 ### Create Top-up Transaction
 
 ```typescript
-const transaction = await api.topup.create({
+const transaction = await api.topup.request({
   licenseKey: 'KGITON-2026-XXXXX-00001',
-  tokenAmount: 100,
-  paymentMethod: 'bank_transfer',  // bank_transfer, ewallet, qris, credit_card
-  paymentChannel: 'bca_va',        // bca_va, bni_va, ovo, gopay, qris, etc
+  tokenCount: 100,
+  paymentMethod: 'va_bca',  // checkout_page, va_bri, va_bni, va_bca, qris, dll
   
   // Optional
-  customerName: 'John Doe',
-  customerEmail: 'john@example.com',
   customerPhone: '08123456789',
 });
 
 // Response
-interface TopupTransaction {
-  id: string;
+interface TopupData {
+  transactionId: string;
   licenseKey: string;
-  tokenAmount: number;
-  amount: number;           // Total payment amount (including fee)
-  currency: string;
-  status: 'pending' | 'paid' | 'expired' | 'failed' | 'cancelled';
-  paymentMethod: string;
-  paymentChannel: string;
+  tokensRequested: number;
+  amountToPay: number;        // Total payment amount
+  pricePerToken: number;
+  status: string;
+  paymentMethod: string;      // checkout_page, va_bri, qris, dll
+  gatewayProvider: string;
   
   // Payment details (varies by method)
-  paymentUrl?: string;      // For checkout page redirect
-  vaNumber?: string;        // For virtual account
-  qrCode?: string;          // For QRIS (base64 image)
-  qrString?: string;        // For QRIS (raw string)
+  paymentUrl?: string;        // For checkout page redirect
+  virtualAccount?: VirtualAccountInfo;  // For VA payments
+  qris?: QRISInfo;            // For QRIS payment
+  gatewayTransactionId?: string;
   
   expiresAt: string;
-  createdAt: string;
+}
+
+interface VirtualAccountInfo {
+  number: string;
+  name: string;
+  bank: string;
+}
+
+interface QRISInfo {
+  qrString: string | null;
+  qrImageUrl: string;
 }
 ```
 
@@ -162,17 +166,21 @@ interface TopupTransaction {
 ### Check Transaction Status
 
 ```typescript
+// Authenticated check
 const status = await api.topup.getStatus(transactionId);
+
+// Public check (no auth required)
+const publicStatus = await api.topup.checkStatusPublic(transactionId);
 
 switch (status.status) {
   case 'pending':
     console.log('Waiting for payment...');
-    console.log('Expires at:', status.expiresAt);
     break;
     
+  case 'success':
   case 'paid':
     console.log('Payment successful!');
-    console.log('Tokens added:', status.tokenAmount);
+    console.log('Tokens added:', status.tokensAdded);
     break;
     
   case 'expired':
@@ -180,8 +188,31 @@ switch (status.status) {
     break;
     
   case 'failed':
-    console.log('Payment failed:', status.failureReason);
+  case 'cancelled':
+    console.log('Transaction failed/cancelled');
     break;
+}
+
+// Check transaction type
+if (status.type === 'topup') {
+  console.log('This is a token topup');
+} else if (status.type === 'license_purchase') {
+  console.log('This is a license purchase');
+}
+```
+
+**Response Type:**
+```typescript
+interface TopupStatusData {
+  transactionId: string;
+  type: string;              // 'topup', 'license_purchase', 'license_rental'
+  amount: number;
+  status: TopupStatus;       // 'pending' | 'success' | 'paid' | 'expired' | 'failed' | 'cancelled'
+  tokensAdded?: number;      // Only for topup
+  tokensRequested?: number;  // Only for topup
+  licenseKey?: string;       // Only for license transactions
+  createdAt: string;
+  paidAt?: string;
 }
 ```
 
@@ -190,16 +221,29 @@ switch (status.status) {
 ### Get Transaction History
 
 ```typescript
-const history = await api.topup.getHistory({
-  page: 1,
-  limit: 20,
-  status: 'paid',  // optional: filter by status
-});
+const history = await api.topup.getHistory();
 
-console.log('Total transactions:', history.total);
-history.data.forEach((tx) => {
+history.forEach((tx) => {
+  console.log(`${tx.transactionId}: ${tx.tokenCount} tokens - ${tx.status}`);
+  console.log(`  Method: ${tx.paymentMethod}`);
+  console.log(`  Amount: Rp ${tx.amount}`);
+});
   console.log(`${tx.id}: ${tx.tokenAmount} tokens - ${tx.status}`);
 });
+```
+
+**Response Type:**
+```typescript
+interface TopupHistoryItem {
+  transactionId: string;
+  licenseKey: string;
+  tokenCount: number;
+  amount: number;
+  status: TopupStatus;
+  paymentMethod: string;
+  paidAt?: string;
+  createdAt: string;
+}
 ```
 
 ---
@@ -261,24 +305,32 @@ export default function TopupScreen() {
     setLoading(true);
     try {
       const license = await api.user.getAssignedLicense();
-      const transaction = await api.topup.create({
+      const transaction = await api.topup.request({
         licenseKey: license.key,
-        tokenAmount: selectedPackage.tokenAmount,
-        paymentMethod: selectedMethod.method,
-        paymentChannel: selectedMethod.channel,
+        tokenCount: selectedPackage.tokenAmount,
+        paymentMethod: selectedMethod,
       });
 
       // Handle different payment methods
       if (transaction.paymentUrl) {
         // Redirect to payment page
         await Linking.openURL(transaction.paymentUrl);
-      } else if (transaction.vaNumber) {
+      } else if (transaction.virtualAccount) {
         // Show VA number
         Alert.alert(
           'Virtual Account',
-          `Bank: ${transaction.paymentChannel}\nVA: ${transaction.vaNumber}\nAmount: Rp ${transaction.amount}\nExpires: ${new Date(transaction.expiresAt).toLocaleString()}`,
+          `Bank: ${transaction.virtualAccount.bank}\nVA: ${transaction.virtualAccount.number}\nAmount: Rp ${transaction.amountToPay}\nExpires: ${transaction.expiresAt}`,
           [{ text: 'OK' }]
         );
+      } else if (transaction.qris) {
+        // Show QRIS
+        Alert.alert(
+          'QRIS Payment',
+          `Scan QR code untuk membayar Rp ${transaction.amountToPay}`,
+          [{ text: 'OK' }]
+        );
+        // Navigate to QR display screen
+        // navigation.navigate('QRISPayment', { qrisUrl: transaction.qris.qrImageUrl });
       }
     } catch (error) {
       Alert.alert('Error', error.message);
@@ -316,25 +368,20 @@ export default function TopupScreen() {
 
       {/* Payment Method Selection */}
       <Text style={styles.sectionTitle}>Metode Pembayaran</Text>
-      {paymentMethods.map((method) => (
-        <View key={method.code}>
-          <Text style={styles.methodTitle}>{method.name}</Text>
-          <View style={styles.channelRow}>
-            {method.channels.map((channel) => (
-              <TouchableOpacity
-                key={channel.code}
-                style={[
-                  styles.channelButton,
-                  selectedMethod?.channel === channel.code && styles.selectedChannel,
-                ]}
-                onPress={() => setSelectedMethod({ method: method.code, channel: channel.code })}
-              >
-                <Text>{channel.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      ))}
+      <View style={styles.channelRow}>
+        {paymentMethods.filter(m => m.enabled).map((method) => (
+          <TouchableOpacity
+            key={method.id}
+            style={[
+              styles.channelButton,
+              selectedMethod === method.id && styles.selectedChannel,
+            ]}
+            onPress={() => setSelectedMethod(method.id)}
+          >
+            <Text>{method.name}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {/* Submit Button */}
       <TouchableOpacity
@@ -403,7 +450,7 @@ const api = new KGiTONApiService({ baseUrl: 'https://api.kgiton.com' });
 
 export function usePaymentStatus(transactionId: string) {
   const [status, setStatus] = useState<string>('pending');
-  const [transaction, setTransaction] = useState(null);
+  const [transaction, setTransaction] = useState<TopupStatusData | null>(null);
   const intervalRef = useRef<NodeJS.Timeout>();
 
   useEffect(() => {
@@ -416,7 +463,7 @@ export function usePaymentStatus(transactionId: string) {
         setStatus(data.status);
 
         // Stop polling if payment is complete or failed
-        if (['paid', 'expired', 'failed', 'cancelled'].includes(data.status)) {
+        if (['paid', 'success', 'expired', 'failed', 'cancelled'].includes(data.status)) {
           if (intervalRef.current) {
             clearInterval(intervalRef.current);
           }
@@ -453,6 +500,36 @@ export function usePaymentStatus(transactionId: string) {
 | `INVALID_PAYMENT_METHOD` | Metode tidak tersedia | Gunakan metode lain |
 | `TRANSACTION_EXPIRED` | Transaksi kadaluarsa | Buat transaksi baru |
 | `LICENSE_NOT_FOUND` | License tidak ditemukan | Cek license key |
+
+---
+
+## 🔄 Sync Transaction Status
+
+Untuk polling status transaksi secara langsung dari payment gateway:
+
+```typescript
+const syncPaymentStatus = async (transactionId: string) => {
+  try {
+    const result = await api.topup.syncStatus(transactionId);
+    
+    console.log('Sync Result:', result);
+    console.log('Status:', result.status);
+    console.log('Was Updated:', result.updated);
+    
+    if (result.updated && result.status === 'success') {
+      Alert.alert('Success', 'Payment confirmed!');
+      // Refresh token balance
+    }
+    
+  } catch (error) {
+    console.error('Sync failed:', error);
+  }
+};
+```
+
+**Catatan:**
+- Hanya mendukung QRIS dan Virtual Account
+- Checkout page tidak bisa di-poll (harus menunggu webhook)
 
 ---
 

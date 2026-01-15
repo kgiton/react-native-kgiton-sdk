@@ -6,7 +6,8 @@ import { KGiTONApiClient } from '../KGiTONApiClient';
 import { API_ENDPOINTS } from '../../constants/api';
 import { KGiTONApiException } from '../../exceptions';
 import {
-  LicenseTransactionRequest,
+  LicenseTransactionPurchaseRequest,
+  LicenseTransactionSubscriptionRequest,
   LicenseTransactionData,
   LicenseTransactionStatusData,
   LicenseTransactionHistoryItem,
@@ -22,25 +23,62 @@ export class LicenseTransactionService {
   constructor(private client: KGiTONApiClient) {}
 
   /**
-   * Request a license transaction (buy/rent)
+   * Initiate license purchase payment (for buy type)
    */
-  async request(request: LicenseTransactionRequest): Promise<LicenseTransactionData> {
+  async initiatePurchase(request: LicenseTransactionPurchaseRequest): Promise<LicenseTransactionData> {
     const response = await this.client.post<Record<string, unknown>>(
-      API_ENDPOINTS.LICENSE_TRANSACTION.REQUEST,
+      API_ENDPOINTS.LICENSE_TRANSACTION.PURCHASE,
       {
         license_key: request.licenseKey,
-        transaction_type: request.transactionType,
-        payment_type: request.paymentType ?? 'qris',
-        subscription_months: request.subscriptionMonths,
+        payment_method: request.paymentMethod ?? 'checkout_page',
+        customer_phone: request.customerPhone,
       },
       { requiresAuth: true }
     );
 
     if (!response.success || !response.data) {
-      throw new KGiTONApiException(`Failed to request license transaction: ${response.message}`);
+      throw new KGiTONApiException(`Failed to initiate purchase: ${response.message}`);
     }
 
     return parseLicenseTransactionData(response.data);
+  }
+
+  /**
+   * Initiate license subscription payment (for rent type)
+   */
+  async initiateSubscription(request: LicenseTransactionSubscriptionRequest): Promise<LicenseTransactionData> {
+    const response = await this.client.post<Record<string, unknown>>(
+      API_ENDPOINTS.LICENSE_TRANSACTION.SUBSCRIPTION,
+      {
+        license_key: request.licenseKey,
+        payment_method: request.paymentMethod ?? 'checkout_page',
+        customer_phone: request.customerPhone,
+      },
+      { requiresAuth: true }
+    );
+
+    if (!response.success || !response.data) {
+      throw new KGiTONApiException(`Failed to initiate subscription: ${response.message}`);
+    }
+
+    return parseLicenseTransactionData(response.data);
+  }
+
+  /**
+   * Get my license transactions
+   */
+  async getMyTransactions(): Promise<LicenseTransactionHistoryItem[]> {
+    const response = await this.client.get<Record<string, unknown>>(
+      API_ENDPOINTS.LICENSE_TRANSACTION.MY,
+      { requiresAuth: true }
+    );
+
+    if (!response.success || !response.data) {
+      throw new KGiTONApiException(`Failed to get transactions: ${response.message}`);
+    }
+
+    const items = (response.data as unknown as Array<Record<string, unknown>>) ?? [];
+    return items.map(parseLicenseTransactionHistoryItem);
   }
 
   /**
@@ -60,29 +98,12 @@ export class LicenseTransactionService {
   }
 
   /**
-   * Get transaction history
-   */
-  async getHistory(): Promise<LicenseTransactionHistoryItem[]> {
-    const response = await this.client.get<Record<string, unknown>>(
-      API_ENDPOINTS.LICENSE_TRANSACTION.HISTORY,
-      { requiresAuth: true }
-    );
-
-    if (!response.success || !response.data) {
-      throw new KGiTONApiException(`Failed to get transaction history: ${response.message}`);
-    }
-
-    const items = (response.data.items as Array<Record<string, unknown>>) ?? [];
-    return items.map(parseLicenseTransactionHistoryItem);
-  }
-
-  /**
    * Check if transaction is paid
    */
   async isPaid(transactionId: string): Promise<boolean> {
     try {
       const status = await this.getStatus(transactionId);
-      return status.status === 'paid';
+      return status.status === 'paid' || status.status === 'success';
     } catch {
       return false;
     }

@@ -60,15 +60,26 @@ export const API_ENDPOINTS = {
   
   // Top-up
   TOPUP: {
+    PAYMENT_METHODS: '/topup/payment-methods',
     REQUEST: '/topup/request',
+    CHECK_PUBLIC: (transactionId: string) => `/topup/check/${transactionId}`,
     STATUS: (transactionId: string) => `/topup/status/${transactionId}`,
     HISTORY: '/topup/history',
+    CANCEL: (transactionId: string) => `/topup/cancel/${transactionId}`,
+    SYNC: (transactionId: string) => `/topup/sync/${transactionId}`,
+  },
+  
+  // Partner Payment
+  PARTNER_PAYMENT: {
+    GENERATE: '/partner/payment/generate',
   },
   
   // License Transaction
   LICENSE_TRANSACTION: {
-    REQUEST: '/license-transaction/request',
-    STATUS: (transactionId: string) => `/license-transaction/status/${transactionId}`,
-    HISTORY: '/license-transaction/history',
+    MY: '/license-transactions/my',
+    MY_LICENSES: '/license-transactions/my-licenses',
+    PURCHASE: '/license-transactions/purchase',
+    SUBSCRIPTION: '/license-transactions/subscription',
+    STATUS: (transactionId: string) => `/license-transactions/status/${transactionId}`,
   },
 };

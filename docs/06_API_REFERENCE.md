@@ -205,73 +205,88 @@ interface LicenseValidation {
 
 | Method | Parameters | Return | Description |
 |--------|------------|--------|-------------|
-| `getPackages` | - | `Promise<TopupPackage[]>` | Get available packages |
-| `getPaymentMethods` | - | `Promise<PaymentMethod[]>` | Get payment methods |
-| `create` | `CreateTopupParams` | `Promise<TopupTransaction>` | Create transaction |
-| `getStatus` | `transactionId: string` | `Promise<TopupTransaction>` | Get transaction status |
-| `getHistory` | `GetHistoryParams` | `Promise<PaginatedResponse>` | Get transaction history |
+| `getPaymentMethods` | - | `Promise<PaymentMethodInfo[]>` | Get payment methods |
+| `request` | `TopupRequest` | `Promise<TopupData>` | Create transaction |
+| `getStatus` | `transactionId: string` | `Promise<TopupStatusData>` | Get transaction status (auth) |
+| `checkStatusPublic` | `transactionId: string` | `Promise<TopupStatusData>` | Check status (no auth) |
+| `getHistory` | - | `Promise<TopupHistoryItem[]>` | Get transaction history |
 | `cancel` | `transactionId: string` | `Promise<void>` | Cancel transaction |
+| `isPaid` | `transactionId: string` | `Promise<boolean>` | Check if paid |
 
 ### Types
 
 ```typescript
-interface TopupPackage {
-  id: string;
-  name: string;
-  tokenAmount: number;
-  bonusTokens: number;
-  price: number;
-  currency: string;
-  isActive: boolean;
-}
+type PaymentMethod = 
+  | 'checkout_page'
+  | 'va_bri' | 'va_bni' | 'va_bca' | 'va_mandiri'
+  | 'va_permata' | 'va_bsi' | 'va_cimb'
+  | 'qris';
 
-interface PaymentMethod {
-  code: string;
-  name: string;
-  channels: PaymentChannel[];
-}
-
-interface PaymentChannel {
-  code: string;
-  name: string;
-  minAmount: number;
-  maxAmount: number;
-  fee: number;
-  feeType: 'fixed' | 'percentage';
-}
-
-interface CreateTopupParams {
+interface TopupRequest {
+  tokenCount: number;
   licenseKey: string;
-  tokenAmount: number;
-  paymentMethod: string;
-  paymentChannel: string;
-  customerName?: string;
-  customerEmail?: string;
+  paymentMethod?: PaymentMethod;
   customerPhone?: string;
 }
 
-interface TopupTransaction {
-  id: string;
-  licenseKey: string;
-  tokenAmount: number;
-  amount: number;
-  currency: string;
-  status: 'pending' | 'paid' | 'expired' | 'failed' | 'cancelled';
-  paymentMethod: string;
-  paymentChannel: string;
-  paymentUrl?: string;
-  vaNumber?: string;
-  qrCode?: string;
-  qrString?: string;
-  expiresAt: string;
-  paidAt?: string;
-  createdAt: string;
+interface PaymentMethodInfo {
+  id: string;          // checkout_page, va_bri, qris, dll
+  name: string;
+  description?: string;
+  type: 'checkout' | 'va' | 'qris';
+  enabled: boolean;
 }
 
-interface GetHistoryParams {
-  page?: number;
-  limit?: number;
-  status?: string;
+interface VirtualAccountInfo {
+  number: string;
+  name: string;
+  bank: string;
+}
+
+interface QRISInfo {
+  qrString: string | null;
+  qrImageUrl: string;
+}
+
+interface TopupData {
+  transactionId: string;
+  licenseKey: string;
+  tokensRequested: number;
+  amountToPay: number;
+  pricePerToken: number;
+  status: string;
+  paymentMethod: string;
+  gatewayProvider: string;
+  paymentUrl?: string;           // For checkout_page
+  virtualAccount?: VirtualAccountInfo;  // For VA payments
+  qris?: QRISInfo;               // For QRIS payment
+  gatewayTransactionId?: string;
+  expiresAt: string;
+}
+
+type TopupStatus = 'pending' | 'success' | 'paid' | 'expired' | 'failed' | 'cancelled';
+
+interface TopupStatusData {
+  transactionId: string;
+  type: string;              // 'topup', 'license_purchase', 'license_rental'
+  amount: number;
+  status: TopupStatus;
+  tokensAdded?: number;      // Only for topup
+  tokensRequested?: number;  // Only for topup
+  licenseKey?: string;       // Only for license transactions
+  createdAt: string;
+  paidAt?: string;
+}
+
+interface TopupHistoryItem {
+  transactionId: string;
+  licenseKey: string;
+  tokenCount: number;
+  amount: number;
+  status: TopupStatus;
+  paymentMethod: PaymentMethod;
+  paidAt?: string;
+  createdAt: string;
 }
 ```
 
@@ -285,27 +300,69 @@ interface GetHistoryParams {
 
 | Method | Parameters | Return | Description |
 |--------|------------|--------|-------------|
-| `getAll` | `GetAllParams` | `Promise<PaginatedResponse>` | Get all transactions |
-| `getById` | `transactionId: string` | `Promise<LicenseTransaction>` | Get transaction by ID |
-| `getSummary` | - | `Promise<TransactionSummary>` | Get summary |
+| `getMyTransactions` | - | `Promise<LicenseTransactionData[]>` | Get user's transactions |
+| `getMyLicenses` | - | `Promise<MyLicenseData[]>` | Get user's licenses |
+| `initiatePurchase` | `LicenseTransactionPurchaseRequest` | `Promise<LicenseTransactionResponse>` | Initiate purchase payment |
+| `initiateSubscription` | `LicenseTransactionSubscriptionRequest` | `Promise<LicenseTransactionResponse>` | Initiate subscription payment |
 
 ### Types
 
 ```typescript
-interface LicenseTransaction {
-  id: string;
+type LicensePaymentMethod = 
+  | 'checkout_page'
+  | 'va_bri' | 'va_bni' | 'va_bca' | 'va_mandiri'
+  | 'va_permata' | 'va_bsi' | 'va_cimb'
+  | 'qris';
+
+interface LicenseTransactionPurchaseRequest {
   licenseKey: string;
-  type: 'purchase' | 'subscription' | 'topup' | 'usage';
-  amount: number;
-  tokenAmount: number;
-  status: string;
-  createdAt: string;
+  paymentMethod: LicensePaymentMethod;
 }
 
-interface TransactionSummary {
-  totalTransactions: number;
-  totalAmount: number;
-  totalTokens: number;
+interface LicenseTransactionSubscriptionRequest {
+  licenseKey: string;
+  paymentMethod: LicensePaymentMethod;
+}
+
+interface LicenseTransactionData {
+  id: string;
+  licenseKey: string;
+  type: 'license_purchase' | 'license_rental';
+  status: string;
+  amount: number;
+  paymentMethod?: string;
+  createdAt: string;
+  paidAt?: string;
+}
+
+interface BillingPeriod {
+  startDate: string;
+  endDate: string;
+  durationDays: number;
+}
+
+interface LicenseTransactionResponse {
+  transactionId: string;
+  licenseKey: string;
+  type: string;
+  amount: number;
+  status: string;
+  paymentMethod: string;
+  paymentUrl?: string;
+  virtualAccount?: VirtualAccountInfo;
+  qris?: QRISInfo;
+  billingPeriod?: BillingPeriod;
+  expiresAt?: string;
+}
+
+interface MyLicenseData {
+  licenseKey: string;
+  deviceName: string;
+  status: string;
+  type: 'buy' | 'rent';
+  expiresAt?: string;
+  tokenBalance: number;
+  createdAt: string;
 }
 ```
 

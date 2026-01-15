@@ -10,16 +10,40 @@ export type LicenseTransactionType = 'buy' | 'rent';
 /**
  * Transaction status
  */
-export type LicenseTransactionStatus = 'pending' | 'paid' | 'expired' | 'failed' | 'cancelled';
+export type LicenseTransactionStatus = 'pending' | 'paid' | 'success' | 'expired' | 'failed' | 'cancelled';
 
 /**
- * License transaction request
+ * Payment method for license transactions
  */
-export interface LicenseTransactionRequest {
+export type LicensePaymentMethod =
+  | 'checkout_page'
+  | 'va_bri'
+  | 'va_bni'
+  | 'va_bca'
+  | 'va_mandiri'
+  | 'va_permata'
+  | 'va_bsi'
+  | 'va_cimb'
+  | 'qris'
+  | 'cash'
+  | 'manual';
+
+/**
+ * License transaction request (purchase)
+ */
+export interface LicenseTransactionPurchaseRequest {
   licenseKey: string;
-  transactionType: LicenseTransactionType;
-  paymentType?: 'qris' | 'checkout_page';
-  subscriptionMonths?: number; // For rent type
+  paymentMethod?: LicensePaymentMethod;
+  customerPhone?: string;
+}
+
+/**
+ * License transaction request (subscription)
+ */
+export interface LicenseTransactionSubscriptionRequest {
+  licenseKey: string;
+  paymentMethod?: LicensePaymentMethod;
+  customerPhone?: string;
 }
 
 /**
@@ -31,10 +55,16 @@ export interface LicenseTransactionData {
   transactionType: LicenseTransactionType;
   amount: number;
   status: LicenseTransactionStatus;
+  paymentMethod?: string;
   paymentUrl?: string;
+  vaNumber?: string;
   qris?: {
-    qrContent: string;
+    qrContent: string | null;
     qrImageUrl: string;
+  };
+  billingPeriod?: {
+    start: string;
+    end: string;
   };
   expiresAt: string;
   createdAt: string;
@@ -60,6 +90,9 @@ export interface LicenseTransactionHistoryItem {
   transactionType: LicenseTransactionType;
   amount: number;
   status: LicenseTransactionStatus;
+  paymentMethod?: string;
+  billingPeriodStart?: string;
+  billingPeriodEnd?: string;
   paidAt?: string;
   createdAt: string;
 }
@@ -73,6 +106,7 @@ export interface LicenseTransactionHistoryItem {
  */
 export function parseLicenseTransactionData(json: Record<string, unknown>): LicenseTransactionData {
   const qrisJson = json.qris as Record<string, unknown> | undefined;
+  const billingPeriod = json.billing_period as Record<string, unknown> | undefined;
   
   return {
     transactionId: (json.transaction_id as string) ?? '',
@@ -80,11 +114,19 @@ export function parseLicenseTransactionData(json: Record<string, unknown>): Lice
     transactionType: (json.transaction_type as LicenseTransactionType) ?? 'buy',
     amount: (json.amount as number) ?? 0,
     status: (json.status as LicenseTransactionStatus) ?? 'pending',
+    paymentMethod: json.payment_method as string | undefined,
     paymentUrl: json.payment_url as string | undefined,
+    vaNumber: json.va_number as string | undefined,
     qris: qrisJson
       ? {
-          qrContent: (qrisJson.qr_content as string) ?? '',
+          qrContent: (qrisJson.qr_content as string) ?? null,
           qrImageUrl: (qrisJson.qr_image_url as string) ?? '',
+        }
+      : undefined,
+    billingPeriod: billingPeriod
+      ? {
+          start: (billingPeriod.start as string) ?? '',
+          end: (billingPeriod.end as string) ?? '',
         }
       : undefined,
     expiresAt: (json.expires_at as string) ?? '',
@@ -110,11 +152,14 @@ export function parseLicenseTransactionStatusData(json: Record<string, unknown>)
  */
 export function parseLicenseTransactionHistoryItem(json: Record<string, unknown>): LicenseTransactionHistoryItem {
   return {
-    transactionId: (json.transaction_id as string) ?? '',
+    transactionId: (json.id as string) ?? (json.transaction_id as string) ?? '',
     licenseKey: (json.license_key as string) ?? '',
     transactionType: (json.transaction_type as LicenseTransactionType) ?? 'buy',
     amount: (json.amount as number) ?? 0,
     status: (json.status as LicenseTransactionStatus) ?? 'pending',
+    paymentMethod: json.payment_method as string | undefined,
+    billingPeriodStart: json.billing_period_start as string | undefined,
+    billingPeriodEnd: json.billing_period_end as string | undefined,
     paidAt: json.paid_at as string | undefined,
     createdAt: (json.created_at as string) ?? new Date().toISOString(),
   };

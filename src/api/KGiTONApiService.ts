@@ -10,6 +10,7 @@ import { UserService } from './services/UserService';
 import { LicenseService } from './services/LicenseService';
 import { TopupService } from './services/TopupService';
 import { LicenseTransactionService } from './services/LicenseTransactionService';
+import { PartnerPaymentService } from './services/PartnerPaymentService';
 
 /**
  * KGiTON API Service
@@ -20,6 +21,7 @@ import { LicenseTransactionService } from './services/LicenseTransactionService'
  * - License (validate license)
  * - Top-up (purchase tokens)
  * - License Transactions (purchase/subscription)
+ * - Partner Payment (generate QRIS/checkout page for partner transactions)
  * 
  * @example
  * ```typescript
@@ -40,6 +42,13 @@ import { LicenseTransactionService } from './services/LicenseTransactionService'
  * 
  * // Use token
  * const result = await api.user.useToken('LICENSE-KEY');
+ * 
+ * // Generate partner payment (QRIS)
+ * const payment = await api.partnerPayment.generateQris({
+ *   transactionId: 'TRX-001',
+ *   amount: 50000,
+ *   licenseKey: 'LICENSE-KEY',
+ * });
  * ```
  */
 export class KGiTONApiService {
@@ -50,6 +59,7 @@ export class KGiTONApiService {
   public readonly license: LicenseService;
   public readonly topup: TopupService;
   public readonly licenseTransaction: LicenseTransactionService;
+  public readonly partnerPayment: PartnerPaymentService;
 
   constructor(config: KGiTONApiClientConfig = {}) {
     this._client = new KGiTONApiClient(config);
@@ -72,6 +82,7 @@ export class KGiTONApiService {
     (this as { license: LicenseService }).license = new LicenseService(this._client);
     (this as { topup: TopupService }).topup = new TopupService(this._client);
     (this as { licenseTransaction: LicenseTransactionService }).licenseTransaction = new LicenseTransactionService(this._client);
+    (this as { partnerPayment: PartnerPaymentService }).partnerPayment = new PartnerPaymentService(this._client);
   }
 
   /**

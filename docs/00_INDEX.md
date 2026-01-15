@@ -15,6 +15,7 @@ Selamat datang di dokumentasi @kgiton/react-native-sdk. Panduan ini akan membant
 | 5 | [BLE Integration](05_BLE_INTEGRATION.md) | Koneksi ke timbangan, streaming berat, buzzer |
 | 6 | [API Reference](06_API_REFERENCE.md) | Referensi lengkap semua API |
 | 7 | [Troubleshooting](07_TROUBLESHOOTING.md) | Masalah umum dan solusinya |
+| 8 | [Partner Payment](08_PARTNER_PAYMENT.md) | Generate pembayaran QRIS/Checkout untuk partner |
 
 ---
 

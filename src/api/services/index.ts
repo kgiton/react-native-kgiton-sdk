@@ -3,3 +3,4 @@ export { UserService } from './UserService';
 export { LicenseService } from './LicenseService';
 export { TopupService } from './TopupService';
 export { LicenseTransactionService } from './LicenseTransactionService';
+export { PartnerPaymentService } from './PartnerPaymentService';
