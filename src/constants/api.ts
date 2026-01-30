@@ -67,6 +67,7 @@ export const API_ENDPOINTS = {
     HISTORY: '/topup/history',
     CANCEL: (transactionId: string) => `/topup/cancel/${transactionId}`,
     SYNC: (transactionId: string) => `/topup/sync/${transactionId}`,
+    BONUS_TIERS: '/topup/bonus-tiers',
   },
   
   // Partner Payment

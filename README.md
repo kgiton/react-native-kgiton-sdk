@@ -38,6 +38,17 @@ KGiTON menggunakan sistem token untuk penggunaan timbangan:
 - **1 Token = 1 Sesi Penimbangan**
 - Token dapat dibeli (top-up) melalui berbagai metode pembayaran
 - Setiap license key memiliki saldo token tersendiri
+- **Bonus tokens** diberikan berdasarkan jumlah pembelian
+
+### 🎁 Bonus Token Tiers
+
+| Token Range | Bonus |
+|-------------|-------|
+| 100 - 499 | 0 |
+| 500 - 999 | +25 |
+| 1,000 - 4,999 | +100 |
+| 5,000 - 9,999 | +750 |
+| 10,000+ | +2,000 |
 
 ---
 

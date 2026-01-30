@@ -6,6 +6,20 @@ Panduan lengkap untuk top-up token melalui berbagai metode pembayaran.
 
 ## 📋 Overview
 
+### 🎁 Bonus Token Tiers
+
+Setiap pembelian token akan mendapatkan bonus berdasarkan jumlah yang dibeli:
+
+| Token Range | Bonus Tokens |
+|-------------|-------------|
+| 100 - 499 | 0 |
+| 500 - 999 | +25 |
+| 1,000 - 4,999 | +100 |
+| 5,000 - 9,999 | +750 |
+| 10,000+ | +2,000 |
+
+**Contoh:** Beli 1,000 token → Dapat 1,000 + 100 bonus = **1,100 total tokens**
+
 ### Payment Flow
 
 ```
@@ -50,11 +64,14 @@ const api = new KGiTONApiService({ baseUrl: 'https://api.kgiton.com' });
 // Create top-up transaction
 const transaction = await api.topup.request({
   licenseKey: 'KGITON-2026-XXXXX-00001',
-  tokenCount: 100,
+  tokenCount: 1000,
   paymentMethod: 'va_bca', // checkout_page, va_bri, va_bni, va_bca, qris, dll
 });
 
 console.log('Transaction ID:', transaction.transactionId);
+console.log('Tokens Requested:', transaction.tokensRequested);
+console.log('Bonus Tokens:', transaction.bonusTokens);     // +100 for 1000 tokens
+console.log('Total Tokens:', transaction.totalTokens);     // 1100
 console.log('Payment URL:', transaction.paymentUrl);
 console.log('VA Number:', transaction.virtualAccount?.number);
 console.log('QRIS URL:', transaction.qris?.qrImageUrl);
@@ -134,6 +151,8 @@ interface TopupData {
   transactionId: string;
   licenseKey: string;
   tokensRequested: number;
+  bonusTokens: number;        // Bonus based on purchase tier
+  totalTokens: number;        // tokensRequested + bonusTokens
   amountToPay: number;        // Total payment amount
   pricePerToken: number;
   status: string;

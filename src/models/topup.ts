@@ -55,6 +55,8 @@ export interface TopupData {
   transactionId: string;
   licenseKey: string;
   tokensRequested: number;
+  bonusTokens: number;
+  totalTokens: number;
   amountToPay: number;
   pricePerToken: number;
   status: string;
@@ -89,6 +91,8 @@ export interface TopupHistoryItem {
   transactionId: string;
   licenseKey: string;
   tokenCount: number;
+  bonusTokens?: number;
+  totalTokens?: number;
   amount: number;
   status: TopupStatus;
   paymentMethod: PaymentMethod;
@@ -107,9 +111,38 @@ export interface PaymentMethodInfo {
   enabled: boolean;
 }
 
+/**
+ * Bonus tier configuration for token purchases
+ */
+export interface BonusTier {
+  /** Unique tier identifier */
+  id: string;
+  /** Minimum tokens to qualify for this tier */
+  minTokens: number;
+  /** Maximum tokens for this tier (null = unlimited) */
+  maxTokens: number | null;
+  /** Fixed bonus tokens to award */
+  bonusTokens: number;
+  /** Bonus percentage (optional, for display) */
+  bonusPercentage?: number | null;
+}
+
 // ============================================================================
 // PARSERS
 // ============================================================================
+
+/**
+ * Parse BonusTier from API response
+ */
+export function parseBonusTier(json: Record<string, unknown>): BonusTier {
+  return {
+    id: (json.id as string) ?? '',
+    minTokens: (json.min_tokens as number) ?? 0,
+    maxTokens: json.max_tokens as number | null,
+    bonusTokens: (json.bonus_tokens as number) ?? 0,
+    bonusPercentage: json.bonus_percentage as number | null | undefined,
+  };
+}
 
 /**
  * Parse TopupData from API response
@@ -117,11 +150,15 @@ export interface PaymentMethodInfo {
 export function parseTopupData(json: Record<string, unknown>): TopupData {
   const vaJson = json.virtual_account as Record<string, unknown> | undefined;
   const qrisJson = json.qris as Record<string, unknown> | undefined;
+  const tokensRequested = (json.tokens_requested as number) ?? 0;
+  const bonusTokens = (json.bonus_tokens as number) ?? 0;
   
   return {
     transactionId: (json.transaction_id as string) ?? '',
     licenseKey: (json.license_key as string) ?? '',
-    tokensRequested: (json.tokens_requested as number) ?? 0,
+    tokensRequested,
+    bonusTokens,
+    totalTokens: (json.total_tokens as number) ?? (tokensRequested + bonusTokens),
     amountToPay: (json.amount_to_pay as number) ?? 0,
     pricePerToken: (json.price_per_token as number) ?? 0,
     status: (json.status as string) ?? 'PENDING',
@@ -167,10 +204,14 @@ export function parseTopupStatusData(json: Record<string, unknown>): TopupStatus
  * Parse TopupHistoryItem from API response
  */
 export function parseTopupHistoryItem(json: Record<string, unknown>): TopupHistoryItem {
+  const tokenCount = (json.tokens_added as number) ?? 0;
+  const bonusTokens = (json.bonus_tokens as number) ?? 0;
   return {
     transactionId: (json.id as string) ?? (json.transaction_id as string) ?? '',
     licenseKey: (json.license_key as string) ?? '',
-    tokenCount: (json.tokens_added as number) ?? 0,
+    tokenCount,
+    bonusTokens: bonusTokens || undefined,
+    totalTokens: bonusTokens > 0 ? tokenCount + bonusTokens : undefined,
     amount: (json.amount as number) ?? 0,
     status: (json.status as TopupStatus) ?? 'pending',
     paymentMethod: (json.payment_method as PaymentMethod) ?? 'checkout_page',

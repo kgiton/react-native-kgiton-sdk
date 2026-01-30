@@ -12,11 +12,13 @@ import {
   TopupHistoryItem,
   PaymentMethodInfo,
   SyncTransactionResponse,
+  BonusTier,
   parseTopupData,
   parseTopupStatusData,
   parseTopupHistoryItem,
   parsePaymentMethodInfo,
   parseSyncTransactionResponse,
+  parseBonusTier,
 } from '../../models/topup';
 
 /**
@@ -164,5 +166,25 @@ export class TopupService {
     }
 
     return parseSyncTransactionResponse(response.data);
+  }
+
+  /**
+   * Get bonus token tiers
+   * 
+   * Returns the current bonus tier configuration from the server.
+   * Tiers are managed by Super Admin and can change over time.
+   */
+  async getBonusTiers(): Promise<BonusTier[]> {
+    const response = await this.client.get<Record<string, unknown>>(
+      API_ENDPOINTS.TOPUP.BONUS_TIERS,
+      { requiresAuth: false }
+    );
+
+    if (!response.success || !response.data) {
+      throw new KGiTONApiException(`Failed to get bonus tiers: ${response.message}`);
+    }
+
+    const tiers = (response.data as unknown as Array<Record<string, unknown>>) ?? [];
+    return tiers.map(parseBonusTier);
   }
 }
