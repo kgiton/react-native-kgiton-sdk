@@ -126,6 +126,8 @@ interface User {
 | `changePassword` | `ChangePasswordParams` | `Promise<void>` | Change password |
 | `getAssignedLicense` | - | `Promise<License>` | Get assigned license |
 | `useToken` | `licenseKey: string` | `Promise<UseTokenResult>` | Use 1 token |
+| `getTokenUsageStats` | - | `Promise<TokenUsageStats>` | Get usage stats |
+| `getLicenseTokenUsage` | `licenseKey, page?, limit?` | `Promise<LicenseTokenUsageResponse>` | Get license usage history |
 | `getApiKey` | - | `Promise<string>` | Get API key |
 | `regenerateApiKey` | - | `Promise<string>` | Regenerate API key |
 
@@ -157,6 +159,35 @@ interface UseTokenResult {
   success: boolean;
   remainingBalance: number;
   usedAt: string;
+}
+
+interface TokenUsageStats {
+  weeklyUsage: number;
+  avgDailyUsage: number;
+  estimatedDaysRemaining: number | null;
+  usageHistory: TokenUsageRecord[];
+}
+
+interface TokenUsageRecord {
+  date: string;
+  tokensUsed: number;
+}
+
+interface LicenseTokenUsageResponse {
+  licenseKey: string;
+  records: LicenseTokenUsage[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+interface LicenseTokenUsage {
+  id: string;
+  tokensUsed: number;
+  purpose?: string;
+  metadata?: Record<string, any>;
+  createdAt: string;
 }
 ```
 

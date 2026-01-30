@@ -354,6 +354,89 @@ export function useTokenBalance() {
 
 ---
 
+## 📊 Token Usage Statistics
+
+### Get Token Usage Stats
+
+Dapatkan statistik penggunaan token (weekly usage, average, estimasi).
+
+```typescript
+const stats = await api.user.getTokenUsageStats();
+
+console.log('Weekly Usage:', stats.weeklyUsage);
+console.log('Weekly Labels:', stats.weeklyLabels);
+console.log('Total This Week:', stats.totalThisWeek);
+console.log('Avg Daily Usage:', stats.avgDailyUsage);
+console.log('Est Days Remaining:', stats.estDaysRemaining);
+```
+
+**Response Type:**
+
+```typescript
+interface TokenUsageStats {
+  weeklyUsage: number[];        // [12, 19, 8, 15, 22, 10, 5]
+  weeklyLabels: string[];       // ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+  totalThisWeek: number;        // Total minggu ini
+  avgDailyUsage: number;        // Rata-rata harian
+  estDaysRemaining: number;     // Estimasi hari tersisa
+}
+```
+
+---
+
+### Get Per-License Usage History
+
+Dapatkan riwayat penggunaan token untuk license tertentu.
+
+```typescript
+const usage = await api.user.getLicenseTokenUsage('LICENSE-KEY', 1, 20);
+
+console.log('License:', usage.data.licenseKey);
+console.log('Current Balance:', usage.data.currentBalance);
+console.log('Weekly Usage:', usage.data.weeklyUsage);
+console.log('Avg Daily:', usage.data.avgDailyUsage);
+
+// Usage history
+for (const record of usage.data.usageHistory) {
+  console.log(`${record.purpose}: -${record.tokensUsed} (${record.createdAt})`);
+}
+
+// Pagination
+console.log(`Page ${usage.pagination.page} of ${usage.pagination.totalPages}`);
+```
+
+**Response Type:**
+
+```typescript
+interface LicenseTokenUsageResponse {
+  data: {
+    licenseKey: string;
+    currentBalance: number;
+    weeklyUsage: number;
+    avgDailyUsage: number;
+    usageHistory: TokenUsageRecord[];
+  };
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+interface TokenUsageRecord {
+  id: string;
+  tokensUsed: number;
+  previousBalance: number;
+  newBalance: number;
+  purpose: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+```
+
+---
+
 <p align="center">
   <a href="02_AUTHENTICATION.md">← Authentication</a> •
   <a href="04_TOPUP_PAYMENT.md">Top-up & Payment →</a>

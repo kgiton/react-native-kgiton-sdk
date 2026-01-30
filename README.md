@@ -214,6 +214,19 @@ console.log('Token Balance:', license.tokenBalance);
 // Use a token for weighing session
 const result = await api.user.useToken(license.key);
 console.log('Remaining tokens:', result.remainingBalance);
+
+// Get token usage statistics
+const stats = await api.user.getTokenUsageStats();
+console.log('Weekly Usage:', stats.weeklyUsage);
+console.log('Avg Daily:', stats.avgDailyUsage.toFixed(1));
+console.log('Est Days Remaining:', stats.estimatedDaysRemaining ?? '∞');
+
+// Get per-license usage history
+const usage = await api.user.getLicenseTokenUsage(license.key, 1, 20);
+console.log('Total Records:', usage.total);
+usage.records.forEach(record => {
+  console.log(`${record.createdAt}: ${record.tokensUsed} tokens - ${record.purpose}`);
+});
 ```
 
 ### 3. Top-up Tokens

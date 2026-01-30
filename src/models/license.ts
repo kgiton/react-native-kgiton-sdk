@@ -185,3 +185,108 @@ export function parseUserProfileData(json: Record<string, unknown>): UserProfile
     licenseKeys: licenseKeysJson.map(parseLicenseKey),
   };
 }
+
+// ============================================================================
+// TOKEN USAGE STATS MODELS
+// ============================================================================
+
+/**
+ * Token usage statistics
+ */
+export interface TokenUsageStats {
+  weeklyUsage: number[];
+  weeklyLabels: string[];
+  totalThisWeek: number;
+  avgDailyUsage: number;
+  estDaysRemaining: number;
+}
+
+/**
+ * Single token usage record
+ */
+export interface TokenUsageRecord {
+  id: string;
+  tokensUsed: number;
+  previousBalance: number;
+  newBalance: number;
+  purpose: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+/**
+ * Per-license token usage data
+ */
+export interface LicenseTokenUsage {
+  licenseKey: string;
+  currentBalance: number;
+  weeklyUsage: number;
+  avgDailyUsage: number;
+  usageHistory: TokenUsageRecord[];
+}
+
+/**
+ * Per-license token usage response with pagination
+ */
+export interface LicenseTokenUsageResponse {
+  data: LicenseTokenUsage;
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+/**
+ * Parse TokenUsageStats from API response
+ */
+export function parseTokenUsageStats(json: Record<string, unknown>): TokenUsageStats {
+  return {
+    weeklyUsage: (json.weekly_usage as number[]) ?? [],
+    weeklyLabels: (json.weekly_labels as string[]) ?? [],
+    totalThisWeek: (json.total_this_week as number) ?? 0,
+    avgDailyUsage: (json.avg_daily_usage as number) ?? 0,
+    estDaysRemaining: (json.est_days_remaining as number) ?? 0,
+  };
+}
+
+/**
+ * Parse TokenUsageRecord from API response
+ */
+export function parseTokenUsageRecord(json: Record<string, unknown>): TokenUsageRecord {
+  return {
+    id: (json.id as string) ?? '',
+    tokensUsed: (json.tokens_used as number) ?? 1,
+    previousBalance: (json.previous_balance as number) ?? 0,
+    newBalance: (json.new_balance as number) ?? 0,
+    purpose: (json.purpose as string) ?? '',
+    metadata: json.metadata as Record<string, unknown> | undefined,
+    createdAt: (json.created_at as string) ?? new Date().toISOString(),
+  };
+}
+
+/**
+ * Parse LicenseTokenUsageResponse from API response
+ */
+export function parseLicenseTokenUsageResponse(json: Record<string, unknown>): LicenseTokenUsageResponse {
+  const dataJson = (json.data as Record<string, unknown>) ?? {};
+  const paginationJson = (json.pagination as Record<string, unknown>) ?? {};
+  const usageHistoryJson = (dataJson.usage_history as Array<Record<string, unknown>>) ?? [];
+  
+  return {
+    data: {
+      licenseKey: (dataJson.license_key as string) ?? '',
+      currentBalance: (dataJson.current_balance as number) ?? 0,
+      weeklyUsage: (dataJson.weekly_usage as number) ?? 0,
+      avgDailyUsage: (dataJson.avg_daily_usage as number) ?? 0,
+      usageHistory: usageHistoryJson.map(parseTokenUsageRecord),
+    },
+    pagination: {
+      page: (paginationJson.page as number) ?? 1,
+      limit: (paginationJson.limit as number) ?? 20,
+      total: (paginationJson.total as number) ?? 0,
+      totalPages: (paginationJson.totalPages as number) ?? 1,
+    },
+  };
+}

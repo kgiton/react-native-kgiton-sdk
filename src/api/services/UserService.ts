@@ -11,10 +11,14 @@ import {
   UseTokenRequest,
   UseTokenResponse,
   LicenseKey,
+  TokenUsageStats,
+  LicenseTokenUsageResponse,
   parseUserProfileData,
   parseTokenBalanceData,
   parseUseTokenResponse,
   parseLicenseKey,
+  parseTokenUsageStats,
+  parseLicenseTokenUsageResponse,
 } from '../../models/license';
 
 /**
@@ -53,6 +57,42 @@ export class UserService {
     }
 
     return parseTokenBalanceData(response.data);
+  }
+
+  /**
+   * Get token usage statistics
+   */
+  async getTokenUsageStats(): Promise<TokenUsageStats> {
+    const response = await this.client.get<Record<string, unknown>>(
+      API_ENDPOINTS.USER.TOKEN_USAGE_STATS,
+      { requiresAuth: true }
+    );
+
+    if (!response.success || !response.data) {
+      throw new KGiTONApiException(`Failed to get token usage stats: ${response.message}`);
+    }
+
+    return parseTokenUsageStats(response.data);
+  }
+
+  /**
+   * Get per-license token usage details
+   */
+  async getLicenseTokenUsage(
+    licenseKey: string,
+    page = 1,
+    limit = 20
+  ): Promise<LicenseTokenUsageResponse> {
+    const response = await this.client.get<Record<string, unknown>>(
+      `${API_ENDPOINTS.USER.LICENSE_USAGE(licenseKey)}?page=${page}&limit=${limit}`,
+      { requiresAuth: true }
+    );
+
+    if (!response.success || !response.data) {
+      throw new KGiTONApiException(`Failed to get license token usage: ${response.message}`);
+    }
+
+    return parseLicenseTokenUsageResponse(response.data);
   }
 
   /**

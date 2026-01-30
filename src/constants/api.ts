@@ -47,6 +47,8 @@ export const API_ENDPOINTS = {
   USER: {
     PROFILE: '/user/profile',
     TOKEN_BALANCE: '/user/token-balance',
+    TOKEN_USAGE_STATS: '/user/token-usage-stats',
+    LICENSE_USAGE: (licenseKey: string) => `/user/license/${licenseKey}/usage`,
     USE_TOKEN: (licenseKey: string) => `/user/license-keys/${licenseKey}/use-token`,
     ASSIGN_LICENSE: '/user/assign-license',
     REGENERATE_API_KEY: '/user/regenerate-api-key',
