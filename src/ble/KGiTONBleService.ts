@@ -83,6 +83,41 @@ export class KGiTONBleService {
   }
 
   // ============================================================================
+  // BLUETOOTH STATE
+  // ============================================================================
+
+  /**
+   * Check current Bluetooth state without waiting
+   * Returns: 'on' | 'off' | 'unavailable' | 'unknown'
+   */
+  async getBluetoothState(): Promise<'on' | 'off' | 'unavailable' | 'unknown'> {
+    if (!this.manager) {
+      this.manager = new BleManager();
+    }
+
+    const state = await this.manager.state();
+    
+    switch (state) {
+      case State.PoweredOn:
+        return 'on';
+      case State.PoweredOff:
+        return 'off';
+      case State.Unsupported:
+        return 'unavailable';
+      default:
+        return 'unknown';
+    }
+  }
+
+  /**
+   * Check if Bluetooth is enabled
+   */
+  async isBluetoothEnabled(): Promise<boolean> {
+    const state = await this.getBluetoothState();
+    return state === 'on';
+  }
+
+  // ============================================================================
   // INITIALIZATION
   // ============================================================================
 
