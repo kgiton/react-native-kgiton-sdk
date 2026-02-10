@@ -26,7 +26,7 @@ import {
   KGiTONBleConnectionException,
   KGiTONBleLicenseException,
 } from '../exceptions';
-import { DebugLogger } from '../utils/DebugLogger';
+import { DebugLogger, base64Encode, base64Decode } from '../utils';
 
 /**
  * Callback types
@@ -34,6 +34,20 @@ import { DebugLogger } from '../utils/DebugLogger';
 type DeviceCallback = (device: ScaleDevice) => void;
 type WeightCallback = (weight: WeightData) => void;
 type StateCallback = (state: ScaleConnectionState) => void;
+
+/**
+ * Scan options for BLE device scanning
+ */
+export interface ScanOptions {
+  /** Filter by service UUID (default: false - scans ALL devices) */
+  filterByServiceUuid?: boolean;
+  /** Allow duplicate device reports for RSSI updates (default: true) */
+  allowDuplicates?: boolean;
+  /** Custom scan timeout in milliseconds (default: BLE_CONFIG.SCAN_TIMEOUT) */
+  timeout?: number;
+  /** Scan for all devices regardless of name prefix (default: false) */
+  scanAllDevices?: boolean;
+}
 
 /**
  * KGiTON BLE Service
@@ -177,25 +191,36 @@ export class KGiTONBleService {
     const permissions: string[] = [];
 
     if (apiLevel >= 31) {
-      // Android 12+
+      // Android 12+ - need BLUETOOTH_SCAN and BLUETOOTH_CONNECT
+      // Also add FINE_LOCATION for better compatibility (some devices still require it)
       permissions.push(
         PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
       );
     } else {
-      // Android 11 and below
+      // Android 11 and below - need location permission for BLE scanning
       permissions.push(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
     }
+    
+    DebugLogger.logBle('Requesting Android permissions', { apiLevel, permissions });
 
     const results = await PermissionsAndroid.requestMultiple(permissions);
+    DebugLogger.logBle('Permission results', results);
 
     const allGranted = Object.values(results).every(
       (result) => result === PermissionsAndroid.RESULTS.GRANTED
     );
 
     if (!allGranted) {
-      throw new KGiTONBlePermissionException('Bluetooth permissions denied');
+      const deniedPermissions = Object.entries(results)
+        .filter(([_, value]) => value !== PermissionsAndroid.RESULTS.GRANTED)
+        .map(([key, _]) => key);
+      DebugLogger.logBle('Permissions denied', deniedPermissions);
+      throw new KGiTONBlePermissionException(`Bluetooth permissions denied: ${deniedPermissions.join(', ')}`);
     }
+    
+    DebugLogger.logBle('All permissions granted');
   }
 
   // ============================================================================
@@ -204,8 +229,15 @@ export class KGiTONBleService {
 
   /**
    * Start scanning for KGiTON devices
+   * 
+   * NOTE: By default, this scans for ALL BLE devices and filters by name prefix.
+   * This is more reliable because many devices don't advertise their service UUIDs
+   * in the advertisement packet (only in the GATT table after connection).
+   * 
+   * @param onDeviceFound - Callback when a device is found
+   * @param options - Optional scan options
    */
-  startScan(onDeviceFound: DeviceCallback): void {
+  startScan(onDeviceFound: DeviceCallback, options?: ScanOptions): void {
     if (!this.manager) {
       throw new KGiTONBleNotAvailableException('BLE not initialized. Call initialize() first.');
     }
@@ -215,50 +247,145 @@ export class KGiTONBleService {
       return;
     }
 
-    DebugLogger.logBle('Starting scan');
+    const {
+      filterByServiceUuid = false,  // Default: don't filter by service UUID
+      allowDuplicates = true,       // Default: allow duplicates for RSSI updates
+      timeout = BLE_CONFIG.SCAN_TIMEOUT,
+      scanAllDevices = false,
+    } = options || {};
+
+    console.log('[KGiTON SDK] [BLE] Starting scan with options:', { 
+      filterByServiceUuid, 
+      allowDuplicates, 
+      timeout, 
+      scanAllDevices,
+      platform: Platform.OS,
+      apiLevel: Platform.OS === 'android' ? Platform.Version : 'N/A'
+    });
+    
     this.isScanning = true;
     this.onDeviceFoundCallback = onDeviceFound;
     this.updateState(ConnectionState.SCANNING);
 
+    // Use null for service UUIDs to scan ALL devices (more reliable)
+    // Only filter by service UUID if explicitly requested
+    const serviceUuids = filterByServiceUuid ? [BLE_CONFIG.SERVICE_UUID] : null;
+    
+    console.log('[KGiTON SDK] [BLE] Calling startDeviceScan with serviceUuids:', serviceUuids);
+    
+    // Keep track of scan errors for debugging
+    let scanErrorCount = 0;
+
     this.manager.startDeviceScan(
-      [BLE_CONFIG.SERVICE_UUID],
-      { allowDuplicates: false },
+      serviceUuids,
+      { allowDuplicates },
       (error, device) => {
         if (error) {
-          DebugLogger.logBle('Scan error', error.message);
-          this.stopScan();
+          scanErrorCount++;
+          // Always log the error with full details
+          console.log('[KGiTON SDK] [BLE] Scan callback error:', {
+            message: error.message,
+            errorCode: error.errorCode,
+            reason: error.reason,
+            name: error.name,
+            scanErrorCount
+          });
+          
+          // Only stop for truly critical errors (not error code 101 which can be transient)
+          const criticalErrorCodes = [
+            600, // BluetoothUnavailable
+            601, // BluetoothUnauthorized
+            602, // BluetoothPoweredOff
+          ];
+          
+          // For error 101, only stop if we get multiple consecutive errors
+          if (error.errorCode === 101 && scanErrorCount > 3) {
+            console.log('[KGiTON SDK] [BLE] Too many scan errors, stopping');
+            this.stopScan();
+          } else if (criticalErrorCodes.includes(error.errorCode ?? 0)) {
+            console.log('[KGiTON SDK] [BLE] Critical scan error, stopping:', error.message);
+            this.stopScan();
+          }
           return;
         }
 
-        if (device && device.name?.startsWith(BLE_CONFIG.DEVICE_NAME_PREFIX)) {
-          const scaleDevice: ScaleDevice = {
-            id: device.id,
-            name: device.name ?? 'Unknown',
-            rssi: device.rssi ?? undefined,
-            isConnectable: (device as any).isConnectable ?? true,
-          };
+        if (device) {
+          // Log every device found for debugging (even without name)
+          console.log('[KGiTON SDK] [BLE] Raw device discovered:', { 
+            id: device.id, 
+            name: device.name || '(no name)', 
+            localName: device.localName || '(no localName)',
+            rssi: device.rssi,
+            serviceUUIDs: device.serviceUUIDs,
+          });
+          
+          // Check if device matches our criteria
+          // Use case-insensitive CONTAINS match (same as Flutter SDK)
+          const deviceName = device.name?.toUpperCase() || device.localName?.toUpperCase() || '';
+          const targetName = BLE_CONFIG.DEVICE_NAME_PREFIX.toUpperCase();
+          const matchesNamePrefix = deviceName.includes(targetName);
+          const shouldInclude = scanAllDevices || matchesNamePrefix;
+          
+          if (shouldInclude) {
+            const scaleDevice: ScaleDevice = {
+              id: device.id,
+              name: device.name || device.localName || `Unknown (${device.id.slice(-6)})`,
+              rssi: device.rssi ?? undefined,
+              isConnectable: (device as any).isConnectable ?? true,
+            };
 
-          DebugLogger.logBle('Device found', scaleDevice);
-          this.onDeviceFoundCallback?.(scaleDevice);
+            console.log('[KGiTON SDK] [BLE] Device matched criteria, returning:', scaleDevice);
+            this.onDeviceFoundCallback?.(scaleDevice);
+          } else if (device.name || device.localName) {
+            console.log('[KGiTON SDK] [BLE] Device skipped (name mismatch):', { 
+              name: device.name, 
+              localName: device.localName,
+              id: device.id,
+              expectedContains: BLE_CONFIG.DEVICE_NAME_PREFIX 
+            });
+          }
         }
       }
     );
 
     // Auto-stop after timeout
+    console.log('[KGiTON SDK] [BLE] Scan started, will auto-stop in', timeout, 'ms');
     setTimeout(() => {
       if (this.isScanning) {
+        console.log('[KGiTON SDK] [BLE] Scan timeout reached, stopping');
         this.stopScan();
       }
-    }, BLE_CONFIG.SCAN_TIMEOUT);
+    }, timeout);
+  }
+
+  /**
+   * Start scanning for ALL nearby BLE devices (for debugging/discovery)
+   * This is useful when you don't know the exact name of your device
+   */
+  startScanAll(onDeviceFound: DeviceCallback, timeout?: number): void {
+    this.startScan(onDeviceFound, { 
+      scanAllDevices: true, 
+      allowDuplicates: true,
+      timeout: timeout || 30000 // Longer timeout for discovery
+    });
   }
 
   /**
    * Stop scanning
    */
   stopScan(): void {
-    if (!this.manager || !this.isScanning) return;
+    console.log('[KGiTON SDK] [BLE] stopScan called', { 
+      hasManager: !!this.manager, 
+      isScanning: this.isScanning,
+      connectionState: this.connectionState 
+    });
+    
+    if (!this.manager || !this.isScanning) {
+      console.log('[KGiTON SDK] [BLE] stopScan early return - not scanning or no manager');
+      return;
+    }
 
-    DebugLogger.logBle('Stopping scan');
+    console.log('[KGiTON SDK] [BLE] Stopping scan - calling manager.stopDeviceScan()');
     this.manager.stopDeviceScan();
     this.isScanning = false;
 
@@ -294,6 +421,17 @@ export class KGiTONBleService {
         timeout: BLE_CONFIG.CONNECTION_TIMEOUT,
       });
 
+      // Request larger MTU for Android to handle full license key command (37+ bytes)
+      // Default BLE MTU is 20 bytes which may truncate our commands
+      if (Platform.OS === 'android') {
+        try {
+          const mtu = await device.requestMTU(512);
+          console.log('[KGiTON SDK] [BLE] MTU negotiated:', mtu);
+        } catch (mtuError) {
+          console.log('[KGiTON SDK] [BLE] MTU negotiation failed (using default):', mtuError);
+        }
+      }
+
       await device.discoverAllServicesAndCharacteristics();
 
       this.connectedDevice = device;
@@ -318,15 +456,101 @@ export class KGiTONBleService {
   }
 
   /**
+   * Connect to device and authorize with license key
+   * 
+   * This is the recommended method for connecting to KGiTON scales.
+   * The firmware requires authorization with a valid license key before
+   * it will send weight data.
+   * 
+   * @param deviceId - BLE device ID (MAC address)
+   * @param licenseKey - Full license key (e.g., "YPWH5-EAKT3-HNMX2-RGB6G-55CJ3")
+   * @returns ControlResponse indicating success or failure
+   * 
+   * @example
+   * ```typescript
+   * const result = await ble.connectWithLicenseKey('AA:BB:CC:DD:EE:FF', 'XXXXX-XXXXX-XXXXX-XXXXX-XXXXX');
+   * if (result.success) {
+   *   // Now receiving weight data
+   * }
+   * ```
+   */
+  async connectWithLicenseKey(deviceId: string, licenseKey: string): Promise<ControlResponse> {
+    console.log('[KGiTON SDK] [BLE] connectWithLicenseKey:', { deviceId, licenseKeyPreview: licenseKey.substring(0, 5) + '...' });
+    
+    try {
+      // First establish BLE connection
+      await this.connect(deviceId);
+      
+      // Then send CONNECT command with license key to authorize
+      console.log('[KGiTON SDK] [BLE] Sending CONNECT command with license key...');
+      const response = await this.sendCommand(BLE_COMMANDS.CONNECT_WITH_LICENSE(licenseKey));
+      
+      console.log('[KGiTON SDK] [BLE] CONNECT command response:', response);
+      
+      if (!response.success) {
+        // License invalid, disconnect
+        console.log('[KGiTON SDK] [BLE] License authorization failed, disconnecting...');
+        await this.disconnect();
+        throw new KGiTONBleLicenseException(response.message || 'License key tidak valid untuk timbangan ini');
+      }
+      
+      console.log('[KGiTON SDK] [BLE] License authorized successfully');
+      return response;
+      
+    } catch (error) {
+      console.log('[KGiTON SDK] [BLE] connectWithLicenseKey error:', error);
+      // Ensure disconnect on any error
+      await this.disconnect().catch(() => {});
+      throw error;
+    }
+  }
+
+  /**
+   * Disconnect from device with license key
+   * 
+   * Sends DISCONNECT command before disconnecting BLE connection.
+   * This properly deauthorizes the session on the scale.
+   * 
+   * @param licenseKey - The same license key used to connect
+   */
+  async disconnectWithLicenseKey(licenseKey: string): Promise<ControlResponse> {
+    console.log('[KGiTON SDK] [BLE] disconnectWithLicenseKey');
+    
+    if (!this.isConnected()) {
+      return { success: true, command: 'DISCONNECT', message: 'Not connected' };
+    }
+    
+    try {
+      // Send DISCONNECT command first
+      const response = await this.sendCommand(BLE_COMMANDS.DISCONNECT_WITH_LICENSE(licenseKey));
+      console.log('[KGiTON SDK] [BLE] DISCONNECT command response:', response);
+      
+      // Then disconnect BLE
+      await this.disconnect();
+      
+      return response;
+    } catch (error) {
+      // Disconnect anyway on error
+      await this.disconnect().catch(() => {});
+      throw error;
+    }
+  }
+
+  /**
    * Disconnect from device
+   * 
+   * Note: On Android, we must cancel the device connection FIRST before clearing
+   * subscriptions. This is because calling subscription.remove() while connected
+   * can crash on Android with "NullPointerException: parameter code is null".
+   * When the device connection is cancelled, subscriptions are automatically
+   * invalidated on the native side.
    */
   async disconnect(): Promise<void> {
     DebugLogger.logBle('Disconnecting');
     this.autoReconnect = false;
     this.updateState(ConnectionState.DISCONNECTING);
 
-    this.unsubscribeAll();
-
+    // First, cancel the device connection - this automatically invalidates subscriptions
     if (this.connectedDevice) {
       try {
         await this.manager?.cancelDeviceConnection(this.connectedDevice.id);
@@ -336,7 +560,21 @@ export class KGiTONBleService {
       this.connectedDevice = null;
     }
 
+    // Now safe to clean up subscription references
+    // Don't call remove() - the subscriptions are already invalid after disconnect
+    this.clearSubscriptionReferences();
+
     this.updateState(ConnectionState.DISCONNECTED);
+  }
+
+  /**
+   * Clear subscription references without calling remove()
+   * Used after device disconnect when subscriptions are already invalidated
+   */
+  private clearSubscriptionReferences(): void {
+    this.weightSubscription = null;
+    this.controlSubscription = null;
+    this.stateSubscription = null;
   }
 
   /**
@@ -346,7 +584,8 @@ export class KGiTONBleService {
     this.stateSubscription = device.onDisconnected((error, disconnectedDevice) => {
       DebugLogger.logBle('Device disconnected', error?.message);
       this.connectedDevice = null;
-      this.unsubscribeAll();
+      // Device already disconnected, subscriptions are invalid - just clear references
+      this.clearSubscriptionReferences();
 
       if (this.autoReconnect && this.lastDeviceId) {
         this.attemptReconnect();
@@ -385,42 +624,101 @@ export class KGiTONBleService {
   // ============================================================================
 
   /**
-   * Subscribe to weight characteristic
+   * Subscribe to weight characteristic for real-time weight data
+   * 
+   * The firmware sends weight data in kg format (e.g., "0.500") via BLE NOTIFY.
+   * Data is base64 encoded by react-native-ble-plx.
    */
   private async subscribeToWeight(): Promise<void> {
-    if (!this.connectedDevice) return;
+    if (!this.connectedDevice) {
+      console.log('[KGiTON SDK] [BLE] subscribeToWeight: No connected device');
+      return;
+    }
 
-    this.weightSubscription = this.connectedDevice.monitorCharacteristicForService(
-      BLE_CONFIG.SERVICE_UUID,
-      BLE_CONFIG.WEIGHT_CHARACTERISTIC_UUID,
-      (error, characteristic) => {
-        if (error) {
-          DebugLogger.logBle('Weight subscription error', error.message);
-          return;
-        }
+    console.log('[KGiTON SDK] [BLE] Subscribing to weight characteristic...', {
+      serviceUuid: BLE_CONFIG.SERVICE_UUID,
+      characteristicUuid: BLE_CONFIG.WEIGHT_CHARACTERISTIC_UUID,
+      deviceId: this.connectedDevice.id,
+    });
 
-        if (characteristic?.value) {
-          const data = atob(characteristic.value);
-          const weightData = parseWeightData(data);
-          DebugLogger.logBle('Weight data', weightData);
-          this.onWeightDataCallback?.(weightData);
+    try {
+      this.weightSubscription = this.connectedDevice.monitorCharacteristicForService(
+        BLE_CONFIG.SERVICE_UUID,
+        BLE_CONFIG.WEIGHT_CHARACTERISTIC_UUID,
+        (error, characteristic) => {
+          if (error) {
+            console.log('[KGiTON SDK] [BLE] Weight subscription error:', {
+              message: error.message,
+              errorCode: error.errorCode,
+              reason: error.reason,
+            });
+            return;
+          }
+
+          if (characteristic?.value) {
+            // Decode base64 to string
+            const data = base64Decode(characteristic.value);
+            console.log('[KGiTON SDK] [BLE] Weight data received (raw):', {
+              base64: characteristic.value,
+              decoded: data,
+            });
+            
+            const weightData = parseWeightData(data);
+            console.log('[KGiTON SDK] [BLE] Weight data parsed:', weightData);
+            
+            if (this.onWeightDataCallback) {
+              this.onWeightDataCallback(weightData);
+            } else {
+              console.log('[KGiTON SDK] [BLE] No weight callback registered!');
+            }
+          } else {
+            console.log('[KGiTON SDK] [BLE] Weight characteristic has no value');
+          }
         }
-      }
-    );
+      );
+      
+      console.log('[KGiTON SDK] [BLE] Weight subscription created successfully');
+    } catch (err) {
+      console.log('[KGiTON SDK] [BLE] Failed to subscribe to weight:', err);
+    }
   }
 
   /**
    * Unsubscribe from all characteristics
+   * 
+   * Note: Wrapped in try-catch because react-native-ble-plx can crash on Android
+   * when cancelling subscriptions during disconnect due to null error code in reject.
+   * See: https://github.com/dotintent/react-native-ble-plx/issues/758
    */
   private unsubscribeAll(): void {
-    this.weightSubscription?.remove();
+    // Store references and null them BEFORE calling remove
+    // This prevents race conditions where callbacks fire during removal
+    const weightSub = this.weightSubscription;
+    const controlSub = this.controlSubscription;
+    const stateSub = this.stateSubscription;
+    
     this.weightSubscription = null;
-
-    this.controlSubscription?.remove();
     this.controlSubscription = null;
-
-    this.stateSubscription?.remove();
     this.stateSubscription = null;
+
+    // Remove subscriptions safely - errors during cancel can crash on Android
+    try {
+      weightSub?.remove();
+    } catch (e) {
+      console.log('[KGiTON SDK] [BLE] Error removing weight subscription (ignored):', e);
+    }
+
+    try {
+      controlSub?.remove();
+    } catch (e) {
+      console.log('[KGiTON SDK] [BLE] Error removing control subscription (ignored):', e);
+    }
+
+    try {
+      stateSub?.remove();
+    } catch (e) {
+      console.log('[KGiTON SDK] [BLE] Error removing state subscription (ignored):', e);
+    }
   }
 
   // ============================================================================
@@ -428,38 +726,95 @@ export class KGiTONBleService {
   // ============================================================================
 
   /**
-   * Send control command to device
+   * Send control command to device and wait for notification response
+   * 
+   * The ESP32 firmware sends command responses as BLE notifications on the
+   * control characteristic (not as part of the write response). This method:
+   * 1. Sets up a temporary subscription for the response
+   * 2. Writes the command
+   * 3. Waits for the notification response (with timeout)
    */
-  private async sendCommand(command: string): Promise<ControlResponse> {
+  private async sendCommand(command: string, timeoutMs: number = 2000): Promise<ControlResponse> {
     if (!this.connectedDevice) {
       throw new KGiTONBleConnectionException('Not connected to device');
     }
 
     DebugLogger.logBle('Sending command', command);
 
-    const base64Command = btoa(command);
+    const base64Command = base64Encode(command);
+    console.log('[KGiTON SDK] [BLE] Command:', command, '| Base64:', base64Command);
 
-    try {
-      const characteristic = await this.connectedDevice.writeCharacteristicWithResponseForService(
-        BLE_CONFIG.SERVICE_UUID,
-        BLE_CONFIG.CONTROL_CHARACTERISTIC_UUID,
-        base64Command
-      );
+    return new Promise<ControlResponse>(async (resolve, reject) => {
+      let responseSubscription: Subscription | null = null;
+      let timeoutId: NodeJS.Timeout | null = null;
 
-      if (characteristic.value) {
-        const response = atob(characteristic.value);
-        return parseControlResponse(response);
-      }
-
-      return { success: true, command };
-    } catch (error) {
-      DebugLogger.logBle('Command failed', error);
-      return {
-        success: false,
-        command,
-        message: (error as Error).message,
+      // Cleanup function
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        if (responseSubscription) {
+          try {
+            responseSubscription.remove();
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+          responseSubscription = null;
+        }
       };
-    }
+
+      try {
+        // Set up timeout
+        timeoutId = setTimeout(() => {
+          cleanup();
+          console.log('[KGiTON SDK] [BLE] Command timeout, assuming success');
+          // On timeout, assume success since device might not send response for all commands
+          resolve({ success: true, command, message: 'Timeout - no response' });
+        }, timeoutMs);
+
+        // Subscribe to control characteristic for response notification
+        responseSubscription = this.connectedDevice!.monitorCharacteristicForService(
+          BLE_CONFIG.SERVICE_UUID,
+          BLE_CONFIG.CONTROL_CHARACTERISTIC_UUID,
+          (error, characteristic) => {
+            if (error) {
+              console.log('[KGiTON SDK] [BLE] Control response error:', error.message);
+              // Don't reject on error, wait for timeout
+              return;
+            }
+
+            if (characteristic?.value) {
+              const response = base64Decode(characteristic.value);
+              console.log('[KGiTON SDK] [BLE] Control response received:', response);
+              cleanup();
+              resolve(parseControlResponse(response));
+            }
+          }
+        );
+
+        // Small delay to ensure subscription is active
+        await new Promise(res => setTimeout(res, 50));
+
+        // Write the command WITH response (firmware uses PROPERTY_WRITE, not WRITE_NR)
+        await this.connectedDevice!.writeCharacteristicWithResponseForService(
+          BLE_CONFIG.SERVICE_UUID,
+          BLE_CONFIG.CONTROL_CHARACTERISTIC_UUID,
+          base64Command
+        );
+
+        console.log('[KGiTON SDK] [BLE] Command written, waiting for response...');
+
+      } catch (error) {
+        cleanup();
+        DebugLogger.logBle('Command failed', error);
+        resolve({
+          success: false,
+          command,
+          message: (error as Error).message,
+        });
+      }
+    });
   }
 
   /**
@@ -485,10 +840,23 @@ export class KGiTONBleService {
   }
 
   /**
-   * Validate license on device
+   * Validate/authorize license on device
+   * 
+   * NOTE: This method should be called AFTER connect() to authorize the session.
+   * The firmware requires CONNECT:<licenseKey> command to start sending weight data.
+   * 
+   * Consider using connectWithLicenseKey() instead which handles both connection
+   * and authorization in one call.
+   * 
+   * @param licenseKey - Full license key (e.g., "YPWH5-EAKT3-HNMX2-RGB6G-55CJ3")
+   * @returns true if license is valid
+   * @throws KGiTONBleLicenseException if license is invalid
    */
   async validateLicense(licenseKey: string): Promise<boolean> {
-    const response = await this.sendCommand(BLE_COMMANDS.LICENSE_VALIDATE(licenseKey));
+    const command = BLE_COMMANDS.CONNECT_WITH_LICENSE(licenseKey);
+    console.log('[KGiTON SDK] [BLE] Validating license:', licenseKey.substring(0, 5) + '...');
+    
+    const response = await this.sendCommand(command);
     
     if (!response.success) {
       throw new KGiTONBleLicenseException(response.message ?? 'License validation failed');

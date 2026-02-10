@@ -81,9 +81,9 @@ export class DebugLogger {
   /**
    * Log BLE event
    */
-  static logBle(event: string, data?: unknown): void {
+  static logBle(event: string, ...args: unknown[]): void {
     if (DebugLogger.enabled) {
-      console.log(`${DEBUG_PREFIX} [BLE] ${event}`, data ?? '');
+      console.log(`${DEBUG_PREFIX} [BLE] ${event}`, ...args);
     }
   }
 }

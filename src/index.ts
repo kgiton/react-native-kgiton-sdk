@@ -22,7 +22,7 @@ export { LicenseTransactionService } from './api/services/LicenseTransactionServ
 // ============================================================================
 // BLE SERVICES
 // ============================================================================
-export { KGiTONBleService } from './ble/KGiTONBleService';
+export { KGiTONBleService, ScanOptions } from './ble/KGiTONBleService';
 
 // ============================================================================
 // MODELS

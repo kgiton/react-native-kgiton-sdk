@@ -1,1 +1,1 @@
-export { KGiTONBleService } from './KGiTONBleService';
+export { KGiTONBleService, ScanOptions } from './KGiTONBleService';
