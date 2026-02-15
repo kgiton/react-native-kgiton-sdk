@@ -287,7 +287,6 @@ export class KGiTONBleService {
             message: error.message,
             errorCode: error.errorCode,
             reason: error.reason,
-            name: error.name,
             scanErrorCount
           });
           
@@ -425,7 +424,7 @@ export class KGiTONBleService {
       // Default BLE MTU is 20 bytes which may truncate our commands
       if (Platform.OS === 'android') {
         try {
-          const mtu = await device.requestMTU(512);
+          const mtu = await (device as any).requestMTU(512);
           console.log('[KGiTON SDK] [BLE] MTU negotiated:', mtu);
         } catch (mtuError) {
           console.log('[KGiTON SDK] [BLE] MTU negotiation failed (using default):', mtuError);
@@ -746,31 +745,36 @@ export class KGiTONBleService {
 
     return new Promise<ControlResponse>(async (resolve, reject) => {
       let responseSubscription: Subscription | null = null;
-      let timeoutId: NodeJS.Timeout | null = null;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      let isResolved = false;
 
-      // Cleanup function
+      // Cleanup function - DON'T call subscription.remove() on Android
+      // It causes NullPointerException when the native code tries to reject with null error code
+      // Just null the reference - the subscription will be cleaned up when device disconnects
       const cleanup = () => {
         if (timeoutId) {
           clearTimeout(timeoutId);
           timeoutId = null;
         }
-        if (responseSubscription) {
-          try {
-            responseSubscription.remove();
-          } catch (e) {
-            // Ignore cleanup errors
-          }
-          responseSubscription = null;
-        }
+        // Don't call remove() - it crashes on Android
+        // See: https://github.com/dotintent/react-native-ble-plx/issues/758
+        responseSubscription = null;
+      };
+
+      // Safe resolve that prevents double-resolution
+      const safeResolve = (response: ControlResponse) => {
+        if (isResolved) return;
+        isResolved = true;
+        cleanup();
+        resolve(response);
       };
 
       try {
         // Set up timeout
         timeoutId = setTimeout(() => {
-          cleanup();
           console.log('[KGiTON SDK] [BLE] Command timeout, assuming success');
           // On timeout, assume success since device might not send response for all commands
-          resolve({ success: true, command, message: 'Timeout - no response' });
+          safeResolve({ success: true, command, message: 'Timeout - no response' });
         }, timeoutMs);
 
         // Subscribe to control characteristic for response notification
@@ -787,8 +791,7 @@ export class KGiTONBleService {
             if (characteristic?.value) {
               const response = base64Decode(characteristic.value);
               console.log('[KGiTON SDK] [BLE] Control response received:', response);
-              cleanup();
-              resolve(parseControlResponse(response));
+              safeResolve(parseControlResponse(response));
             }
           }
         );
@@ -806,9 +809,8 @@ export class KGiTONBleService {
         console.log('[KGiTON SDK] [BLE] Command written, waiting for response...');
 
       } catch (error) {
-        cleanup();
         DebugLogger.logBle('Command failed', error);
-        resolve({
+        safeResolve({
           success: false,
           command,
           message: (error as Error).message,
