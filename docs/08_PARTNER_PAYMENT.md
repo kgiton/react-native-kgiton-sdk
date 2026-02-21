@@ -13,6 +13,7 @@ Partner Payment API memungkinkan aplikasi partner (misalnya: Huba POS) untuk:
 
 ### Payment Flow
 
+**Option 1: Webhook (Real-time)**
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │  Partner App    │────▶│  KGiTON API     │────▶│  Payment        │
@@ -23,6 +24,18 @@ Partner Payment API memungkinkan aplikasi partner (misalnya: Huba POS) untuk:
 │  Partner App    │◀────│  Webhook        │◀───────────┘
 │  Receive        │     │  Callback       │
 └─────────────────┘     └─────────────────┘
+```
+
+**Option 2: Polling (Independent, tanpa webhook)**
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Partner App    │────▶│  KGiTON API     │────▶│  Payment        │
+│  Generate       │     │                 │     │  Gateway        │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+        │                       ▲
+        │                       │ (polling setiap 5 detik)
+        └───────────────────────┘
+        checkStatus(transactionId)
 ```
 
 ### Biaya
@@ -274,6 +287,83 @@ const styles = StyleSheet.create({
 
 ---
 
+## 🔄 Check Payment Status (Polling)
+
+Untuk pendekatan **independent tanpa webhook**, gunakan `checkStatus` untuk polling status pembayaran:
+
+```typescript
+// Check payment status
+const checkPaymentStatus = async (transactionId: string) => {
+  try {
+    const status = await api.partnerPayment.checkStatus(transactionId);
+    
+    console.log('Payment Status:', status.paymentStatus);
+    console.log('Amount:', status.amount);
+    
+    if (status.paymentStatus === 'paid') {
+      console.log('✅ Payment received at:', status.paidAt);
+      // Process successful payment
+    } else if (status.paymentStatus === 'expired') {
+      console.log('⏰ Payment expired');
+      // Offer to regenerate payment
+    } else if (status.paymentStatus === 'pending') {
+      console.log('⏳ Still waiting for payment...');
+    }
+    
+    return status;
+  } catch (error) {
+    console.error('Error checking status:', error.message);
+    throw error;
+  }
+};
+```
+
+### Polling Pattern
+
+```typescript
+// Poll payment status every 5 seconds until terminal state
+const pollPaymentStatus = async (
+  transactionId: string,
+  maxDurationMs: number = 300000 // 5 minutes default
+): Promise<'paid' | 'expired' | 'failed' | 'timeout'> => {
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxDurationMs) {
+    try {
+      const status = await api.partnerPayment.checkStatus(transactionId);
+      
+      if (status.paymentStatus === 'paid') {
+        return 'paid';
+      } else if (status.paymentStatus === 'expired') {
+        return 'expired';
+      } else if (status.paymentStatus === 'failed') {
+        return 'failed';
+      }
+      
+      // Wait 5 seconds before next check
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    } catch (error) {
+      console.error('Polling error:', error);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  }
+  
+  return 'timeout';
+};
+
+// Usage
+const result = await pollPaymentStatus(payment.transactionId);
+if (result === 'paid') {
+  showSuccessScreen();
+} else if (result === 'expired') {
+  showExpiredScreen();
+} else {
+  showTimeoutScreen();
+}
+```
+
+---
+
 ## ⚠️ Error Handling
 
 | Error Code | Description | Solution |
@@ -339,6 +429,22 @@ interface PartnerPaymentResponse {
   paymentUrl?: string;          // Checkout URL
   qris?: PartnerQrisData;       // QRIS data
   expiresAt: string;
+}
+```
+
+### PartnerPaymentStatusResponse
+
+```typescript
+interface PartnerPaymentStatusResponse {
+  transactionId: string;
+  paymentStatus: 'pending' | 'paid' | 'expired' | 'failed';
+  amount: number;
+  paymentType: PartnerPaymentType;
+  gatewayTransactionId?: string;
+  paidAt?: string;              // Timestamp when payment was completed
+  expiresAt?: string;
+  webhookSent?: boolean;        // Whether webhook callback was sent
+  createdAt?: string;
 }
 ```
 

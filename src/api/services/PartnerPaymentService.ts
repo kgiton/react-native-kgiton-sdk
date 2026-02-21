@@ -12,7 +12,9 @@ import {
   PartnerPaymentRequest,
   PartnerPaymentResponse,
   PartnerPaymentItem,
+  PartnerPaymentStatusResponse,
   parsePartnerPaymentResponse,
+  parsePartnerPaymentStatusResponse,
 } from '../../models/partnerPayment';
 
 /**
@@ -131,5 +133,48 @@ export class PartnerPaymentService {
       customerEmail: options.customerEmail,
       customerPhone: options.customerPhone,
     });
+  }
+
+  /**
+   * Check payment status
+   * 
+   * Use this to poll payment status instead of relying on webhooks.
+   * This is useful for independent payment status checking.
+   * 
+   * @param transactionId - Partner's unique transaction ID
+   * @returns Current payment status
+   * 
+   * @example
+   * ```typescript
+   * // Poll payment status every 5 seconds
+   * const checkPayment = async () => {
+   *   const status = await api.partnerPayment.checkStatus('TRX-001');
+   *   if (status.paymentStatus === 'paid') {
+   *     console.log('Payment received!');
+   *     // Process successful payment
+   *   } else if (status.paymentStatus === 'expired') {
+   *     console.log('Payment expired');
+   *   } else {
+   *     console.log('Still pending...');
+   *     setTimeout(checkPayment, 5000);
+   *   }
+   * };
+   * ```
+   */
+  async checkStatus(transactionId: string): Promise<PartnerPaymentStatusResponse> {
+    if (!transactionId) {
+      throw new KGiTONApiException('transactionId is required');
+    }
+
+    const response = await this.client.get<Record<string, unknown>>(
+      API_ENDPOINTS.PARTNER_PAYMENT.STATUS(transactionId),
+      { requiresAuth: true }
+    );
+
+    if (!response.success || !response.data) {
+      throw new KGiTONApiException(`Failed to check payment status: ${response.message}`);
+    }
+
+    return parsePartnerPaymentStatusResponse(response.data);
   }
 }

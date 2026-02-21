@@ -95,3 +95,40 @@ export function parsePartnerPaymentResponse(json: Record<string, unknown>): Part
     expiresAt: (json.expires_at as string) ?? '',
   };
 }
+
+/**
+ * Partner payment status type
+ */
+export type PartnerPaymentStatus = 'pending' | 'paid' | 'expired' | 'failed';
+
+/**
+ * Partner payment status response
+ */
+export interface PartnerPaymentStatusResponse {
+  transactionId: string;
+  paymentStatus: PartnerPaymentStatus;
+  amount: number;
+  paymentType: PartnerPaymentType;
+  gatewayTransactionId?: string;
+  paidAt?: string;
+  expiresAt?: string;
+  webhookSent?: boolean;
+  createdAt?: string;
+}
+
+/**
+ * Parse PartnerPaymentStatusResponse from API response
+ */
+export function parsePartnerPaymentStatusResponse(json: Record<string, unknown>): PartnerPaymentStatusResponse {
+  return {
+    transactionId: (json.transaction_id as string) ?? '',
+    paymentStatus: (json.payment_status as PartnerPaymentStatus) ?? 'pending',
+    amount: (json.amount as number) ?? 0,
+    paymentType: (json.payment_type as PartnerPaymentType) ?? 'checkout_page',
+    gatewayTransactionId: json.gateway_transaction_id as string | undefined,
+    paidAt: json.paid_at as string | undefined,
+    expiresAt: json.expires_at as string | undefined,
+    webhookSent: json.webhook_sent as boolean | undefined,
+    createdAt: json.created_at as string | undefined,
+  };
+}

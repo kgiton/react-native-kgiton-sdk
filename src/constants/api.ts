@@ -75,6 +75,7 @@ export const API_ENDPOINTS = {
   // Partner Payment
   PARTNER_PAYMENT: {
     GENERATE: '/partner/payment/generate',
+    STATUS: (transactionId: string) => `/partner/payment/status/${transactionId}`,
   },
   
   // License Transaction
